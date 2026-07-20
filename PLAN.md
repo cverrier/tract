@@ -143,7 +143,7 @@ M3 numbers ignored per methodology.
 
 ---
 
-## Step E — Run on the Cortex-A55 and collect results  *(user runs this)*
+## Step E — Run on the Cortex-A55 and collect results  *(DONE)*
 
 Same `.dinghyignore` trick as the PR description. No `--save-baseline` needed:
 all candidates are distinct ids within one criterion group, so a single run per
@@ -170,9 +170,49 @@ rm -f .dinghyignore
 Run the A55 frequency-locked (`performance` governor) as in the PR. Record the
 median `time:`/`thrpt:` per id at each of the three sizes.
 
+### Results
+
+Cortex-A55, in-order, locked at 1908 MHz (`performance` governor), via dinghy.
+Medians reported as throughput (Melem/s); higher is better. CIs were tight at
+every point (in-order core), so medians are stable.
+
+**Build note (gotcha):** `linalg/build.rs` emits a `rerun-if-changed` per
+template it processes, which disables cargo's whole-package change scanning. A
+*new* `.S.j2` dropped into the globbed `arm64/arm64simd/` dir therefore does not
+trigger a build-script rerun, so a cached cross-build never generates the new
+kernel's asm and the link fails with an undefined symbol (candidate B's
+`arm64simd_sigmoid_f16_4n`). Forcing a rerun (touch `build.rs`, or
+`cargo clean -p tract-linalg`) fixes it. Pre-existing behaviour, not changed here.
+
+**Device note:** the A55 SKU used has FEAT_FP16. So `native-fp16` runs (a real
+ceiling), and the model-level `one-op` dispatches to the *native* fp16 kernel
+rather than the roundtrip fallback — i.e. `one-op` is **not** a clean "A
+end-to-end" row here. The fallback kernels A/B/C are still measured directly by
+name (bypassing dispatch, baseline FCVTL/FCVTN only), so they faithfully reflect
+the non-fp16 fallback cost on this microarchitecture.
+
+Kernel-level (`sigmoid_f16_arm64`):
+
+| size | generic (floor) | A `neon-f32-roundtrip` | B `neon-f32-fused` | C `core-cast-roundtrip` | native-fp16 (ceiling) |
+|------|-----------------|------------------------|--------------------|-------------------------|-----------------------|
+| 1024 (L1)     | 15.11 | 139.75 | **159.95** | 53.90 | 665.75 |
+| 32768 (L2)    | 15.10 | 139.99 | **159.55** | 57.59 | 657.09 |
+| 1048576 (DRAM)| 15.08 | 138.40 | **157.74** | 57.52 | 652.51 |
+
+Model-level (`sigmoid_f16_model`):
+
+| size | one-op (native dispatch on this SKU) | D `codegen-3op` |
+|------|--------------------------------------|-----------------|
+| 1024 (L1)     | 204.88 | 43.38 |
+| 32768 (L2)    | 495.97 | 56.78 |
+| 1048576 (DRAM)| 456.69 | 57.06 |
+
+Raw criterion output saved in the run logs; reproduce with the two commands above
+on the `exp/sigmoid-f16-approaches-pr-2492` branch.
+
 ---
 
-## Step F — Analyze, write up, recommend
+## Step F — Analyze, write up, recommend  *(DONE)*
 
 Build a tradeoff matrix scoring A / B / C / D on:
 - **Perf** (A55 medians at L1 / L2 / DRAM sizes; note M3 only as a smoke check),
@@ -191,6 +231,54 @@ Deliverables:
   "C/D are close enough that the portable core-level approach wins and both
   `act_f16.rs` files can eventually be retired". The winner becomes a separate
   follow-up PR.
+
+### Tradeoff matrix
+
+| axis | A `neon-f32-roundtrip` | B `neon-f32-fused` | C `core-cast` closure | D `codegen-3op` |
+|------|------------------------|--------------------|------------------------|-----------------|
+| **Perf (A55)** | 138–140 Melem/s | **157–160** (best fallback, +14% vs A) | 54–58 | 43–57 |
+| **`unsafe`/maint** | hand-written NEON asm (conversions + f32 kernel + scratch) | **most** asm: a full fused kernel, per op | none (a closure) | none (a graph pass) |
+| **Portability** | arm64 only; every non-top-ISA arch needs its own | arm64 only, per-op | **all archs at once** (incl. x86_64 non-AVX512) | **all archs at once** |
+| **Generality** | per-op | poor — each of tanh/silu/gelu needs its own fused asm | **any activation** — swap the middle op | **any elementwise op** via a generic rule |
+
+### Findings
+
+- **B is the fastest fallback**, a stable **+14%** over A across L1/L2/DRAM. The
+  win comes from never spilling the f32 intermediate to the scratch buffer —
+  convert→sigmoid→convert stays in registers in one pass.
+- **C and D are ~2.4–2.6× slower than A** and land in the same throughput class
+  as each other (54–58 vs 43–57). Both bottleneck on the **same thing**: tract's
+  core `Cast` does *scalar* f16↔f32 conversion. Their number is a property of the
+  scalar cast, **not** of the closure/graph approach itself.
+- **C ≥ D.** D materializes a full-size f32 intermediate (extra memory traffic)
+  and pays per-node dispatch, so it trails C at L1 (43 vs 54) and only ties it at
+  larger sizes. The closure keeps the roundtrip local/chunked.
+- native-fp16 ceiling is ~4.1× above B; irrelevant on the genuinely non-fp16
+  cores this path targets, but it bounds how much headroom any fallback leaves.
+
+### Recommendation
+
+The A-vs-B-vs-C/D question decomposes into two independent axes: **how fast is
+the f16↔f32 conversion** (NEON vs scalar) and **where the roundtrip lives**
+(hand asm vs core). The whole A/B → C/D perf cliff is the *first* axis alone.
+
+- **Do not pursue C or D as-is.** At 2.5× slower than the already-merged A they
+  are a regression, purely because they route through the scalar core `Cast`.
+- **B (+14% over A) does not clearly justify its cost.** It doubles the
+  hand-written asm surface (a full fused kernel *per op*), is arm64-only, and
+  does not generalize to tanh/silu/gelu — the other activations
+  `x86_64_fma/act_f16.rs` already round-trips. A 14% edge on one op is a weak
+  return for that maintenance and generality loss. **Keep A** as the shipping
+  arm64 fallback.
+- **The strategically right direction is portable C/D _paired with a vectorized
+  core f16↔f32 cast_.** A NEON/AVX conversion kernel behind `Tensor::cast_to`
+  would lift C (and D) out of the scalar-cast floor toward the A/B band while
+  keeping zero per-op asm, fixing **every** non-top-ISA arch and **every**
+  activation in one place — and letting both `act_f16.rs` files eventually
+  retire. C (the closure) is the better of the two portable shapes: simpler than
+  a codegen pass and no full-size intermediate. This is the recommended
+  follow-up: **vectorize the core cast, then adopt C**; only fall back to B if a
+  specific hot sigmoid path needs the last 14% on arm64 before that lands.
 
 ---
 
