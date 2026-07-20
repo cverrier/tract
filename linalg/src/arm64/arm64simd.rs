@@ -29,6 +29,8 @@ pub use softmax::arm64simd_softmax2_fastcompact_f32_16n;
 pub use sum::arm64simd_sum_f32_16n;
 pub use unicast::*;
 
+use tract_data::half::f16;
+
 use crate::Ops;
 use crate::block_quant::{PackedBlockQuantFormat, Q4_0};
 use crate::frame::mmm::ImplementationQuality::ManuallyOptimized;
@@ -140,3 +142,4 @@ pub fn plug(ops: &mut Ops) {
 
 tanh_impl!(f32, arm64simd_tanh_f32_4n, 4, 4, true);
 sigmoid_impl!(f32, arm64simd_sigmoid_f32_4n, 4, 4, true);
+sigmoid_impl!(f16, arm64simd_sigmoid_f16_4n, 4, 8, true);

@@ -71,7 +71,7 @@ be faked. If B or D wins, its production implementation is a follow-up.
 
 ---
 
-## Step 0 — Set up the experiment branch  *(do first; prerequisite for all)*
+## Step 0 — Set up the experiment branch  *(DONE)*
 
 - `git checkout perf/add-neon-sigmoid-f16-fallback-on-non-fp16-arm64`
 - `git checkout -b exp/sigmoid-f16-approaches-pr-2492`
@@ -79,39 +79,21 @@ be faked. If B or D wins, its production implementation is a follow-up.
 
 ---
 
-## Step B — Fused in-register f16 sigmoid kernel  *(independent; the only real new production code)*
+## Step B — Fused in-register f16 sigmoid kernel  *(DONE)*
 
-Write a NEON kernel that does load-f16 → `FCVTL`/`FCVTL2` to f32 regs → the
-existing f32 sigmoid polynomial → `FCVTN`/`FCVTN2` → store-f16, in **one pass,
-no scratch buffer**.
+Fused NEON kernel: load f16 → `FCVTL`/`FCVTL2` to f32 → verbatim f32 sigmoid
+polynomial → `FCVTN`/`FCVTN2` → store f16, one pass, no scratch buffer.
 
-**Files:**
-- New: `linalg/arm64/arm64simd/arm64simd_sigmoid_f16_16n.S.j2`. Copy the
-  structure of `linalg/arm64/arm64simd/arm64simd_sigmoid_f32_4n.S.j2`:
-  - Keep header `.cpu generic+fp+simd` — `FCVTL`/`FCVTN` are baseline ASIMD, no
-    FP16 arithmetic feature needed.
-  - Keep the `.coeffs_num` table as f32 `.float` (reuse the accurate f32
-    polynomial verbatim — this also makes B *more accurate* than native-fp16).
-  - Load f16 as `.8h`, expand each q-reg to two f32 `.4s` via `fcvtl`/`fcvtl2`
-    (idiom already in `act_f16.rs:38-45`); run the unrolled `.loop4` polynomial
-    (`arm64simd_sigmoid_f32_4n.S.j2:25-138`) on the f32 regs; pack back with
-    `fcvtn`/`fcvtn2` (`act_f16.rs:84-91`) and `st1 {..8h..}`.
-  - `nr` = 16 (reuses the 16-f32-lane `.loop4` body → 16 f16 lanes/iter). Must
-    be a multiple of 8 (`FCVTL` consumes whole q-regs). Watch register pressure
-    but there is headroom (fewer live f32 lanes per iter than the f32 kernel).
-  - The file auto-compiles via `build.rs:430` (`preprocess_files`) — no manifest
-    edit needed.
-- `linalg/src/arm64/arm64simd.rs`: add `sigmoid_impl!(f16, arm64simd_sigmoid_f16_16n, 16, 8, true);`
-  next to line 142, and `pub use` it next to line 17. (Uses the FFI `ew_impl!`
-  path like the f32 kernel — not `ew_impl_wrap!`.)
+- New `linalg/arm64/arm64simd/arm64simd_sigmoid_f16_4n.S.j2` (16 f16 lanes/iter
+  main `.loop4` reusing the f32 `.loop4` body plus a 4-lane `.loop` remainder,
+  and its accurate `.float` coeffs; auto-compiled by `build.rs`).
+- `arm64simd.rs`: added `use tract_data::half::f16;` and
+  `sigmoid_impl!(f16, arm64simd_sigmoid_f16_4n, 4, 8, true);` (the macro
+  auto-generates the `sigmoid_frame_tests!` correctness module; reached by name via
+  `pub use arm64simd::*`). Dispatch in `arm64.rs` left unchanged — B is bench-only.
 
-**Verify (correctness — required):** add a `sigmoid_frame_tests!(true, f16, arm64simd_sigmoid_f16_16n);`
-test module mirroring `act_f16.rs:136-140`; run `cargo test -p tract-linalg` on
-the M3 (and it will run on A55 via dinghy). These proptests check numeric
-correctness against a reference.
-
-**Do NOT** change dispatch in `arm64.rs:512` in this experiment — B is reached by
-name from the bench only. Flipping the default is part of the follow-up if B wins.
+Verified on M3: `cargo test -p tract-linalg arm64simd_sigmoid_f16_4n` 6/6 pass;
+fmt + clippy clean.
 
 ---
 
@@ -121,7 +103,7 @@ name from the bench only. Flipping the default is part of the follow-up if B win
 
 Add two `bench_with_input` entries inside the existing size loop, alongside
 `generic` / `neon-f32-roundtrip` / `native-fp16`:
-- `"neon-f32-fused"` → `tract_linalg::arm64::arm64simd_sigmoid_f16_16n::run(sf, ())` (candidate **B**).
+- `"neon-f32-fused"` → `tract_linalg::arm64::arm64simd_sigmoid_f16_4n::run(sf, ())` (candidate **B**).
 - `"core-cast-roundtrip"` → candidate **C** proxy: for each iteration, take the
   f16 input as a `Tensor`, `cast_to::<f32>()`, run
   `tract_linalg::arm64::arm64simd_sigmoid_f32_4n::run(...)` on the f32 slice, then
@@ -227,7 +209,7 @@ Suggested split across conversations: {0}, {B + its correctness test}, {C}, {D},
 ## Verification (end-to-end)
 
 - Correctness: `cargo test -p tract-linalg` passes, including the new
-  `sigmoid_frame_tests!` module for `arm64simd_sigmoid_f16_16n` (Step B).
+  `sigmoid_frame_tests!` module for `arm64simd_sigmoid_f16_4n` (Step B).
 - Both benches compile and run to completion on the M3
   (`cargo bench -p tract-linalg --bench sigmoid_f16_arm64`,
   `cargo bench -p tract-core --bench sigmoid_f16_model`).
