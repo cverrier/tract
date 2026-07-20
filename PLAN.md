@@ -97,23 +97,14 @@ fmt + clippy clean.
 
 ---
 
-## Step C — Extend the kernel-level bench (adds A, B, C, and picks up native/generic)  *(depends on B for the B row)*
+## Step C — Extend the kernel-level bench (adds A, B, C, and picks up native/generic)  *(DONE)*
 
-**File:** `linalg/benches/sigmoid_f16_arm64.rs` (extend the existing file).
-
-Add two `bench_with_input` entries inside the existing size loop, alongside
-`generic` / `neon-f32-roundtrip` / `native-fp16`:
-- `"neon-f32-fused"` → `tract_linalg::arm64::arm64simd_sigmoid_f16_4n::run(sf, ())` (candidate **B**).
-- `"core-cast-roundtrip"` → candidate **C** proxy: for each iteration, take the
-  f16 input as a `Tensor`, `cast_to::<f32>()`, run
-  `tract_linalg::arm64::arm64simd_sigmoid_f32_4n::run(...)` on the f32 slice, then
-  `cast_to::<f16>()`. This mirrors what the `nn/mod.rs:23` f16 closure would do
-  with `Tensor::cast_to`, measuring the honest (likely scalar) cast cost.
-
-Keep the three sizes (`1024`, `32_768`, `1_048_576`) spanning L1/L2/DRAM.
-
-**Verify:** `cargo bench -p tract-linalg --bench sigmoid_f16_arm64` on the M3
-(compiles + runs; ignore the numbers).
+Extended `linalg/benches/sigmoid_f16_arm64.rs` with two ids in the existing size
+loop: `neon-f32-fused` (candidate B kernel) and `core-cast-roundtrip` (candidate
+C proxy: `cast_to::<f32>` → f32 kernel → `cast_to::<f16>`). All five ids now share
+the one `sigmoid_f16` group so a single run prints them side by side. Verified on
+M3: compiles, all ids run to completion, fmt clean, no new clippy warnings (M3
+numbers ignored per methodology).
 
 ---
 

@@ -38,6 +38,25 @@ fn sigmoid_f16(c: &mut Criterion) {
             b.iter(|| tract_linalg::arm64::arm64simd_sigmoid_f16_4n::run(sf, ()))
         });
 
+        let mut tb = aligned_input(n);
+        let sb = unsafe { tb.as_slice_mut_unchecked::<f16>() };
+        group.bench_with_input(BenchmarkId::new("neon-f32-fused", n), &(), |b, _| {
+            b.iter(|| tract_linalg::arm64::arm64simd_sigmoid_f16_4n::run(sb, ()))
+        });
+
+        // Candidate C proxy: the tract-core f16 sigmoid closure body, i.e.
+        // Tensor::cast_to::<f32> → f32 kernel → Tensor::cast_to::<f16>. The casts
+        // are tract's real (scalar) conversions, so their cost is measured honestly.
+        let tc = aligned_input(n);
+        group.bench_with_input(BenchmarkId::new("core-cast-roundtrip", n), &(), |b, _| {
+            b.iter(|| {
+                let mut f32t = tc.cast_to::<f32>().unwrap().into_owned();
+                let s = unsafe { f32t.as_slice_mut_unchecked::<f32>() };
+                tract_linalg::arm64::arm64simd_sigmoid_f32_4n::run(s, ());
+                f32t.cast_to::<f16>().unwrap().into_owned()
+            })
+        });
+
         if tract_linalg::arm64::has_fp16() {
             let mut tn = aligned_input(n);
             let sn = unsafe { tn.as_slice_mut_unchecked::<f16>() };
