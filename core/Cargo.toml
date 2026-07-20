@@ -61,3 +61,7 @@ proptest = { version = "1.0.0", default-features = false, features = ["std", "bi
 [[bench]]
 name = "plan_overhead"
 harness = false
+
+[[bench]]
+name = "sigmoid_f16_model"
+harness = false

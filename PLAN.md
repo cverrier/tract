@@ -108,7 +108,7 @@ numbers ignored per methodology).
 
 ---
 
-## Step D — Model-level bench (D-proxy vs current)  *(independent of B/C)*
+## Step D — Model-level bench (D-proxy vs current)  *(DONE)*
 
 **Files:**
 - New: `core/benches/sigmoid_f16_model.rs`, modeled on
@@ -129,8 +129,17 @@ Reuse `sigmoid()` from `tract_core::ops::nn`, `cast()` from
 `tract_core::ops::cast` (see `wire_cast`, `core/src/ops/cast.rs:8-27`), and
 `use tract_core::internal::*;` for `TypedModel`/`tvec!`/`tensor`/`TValue`.
 
-**Verify:** `cargo bench -p tract-core --bench sigmoid_f16_model` on the M3
-(compiles + runs; ignore the numbers).
+Added `core/benches/sigmoid_f16_model.rs` (`one-op` and `codegen-3op` ids in one
+`sigmoid_f16_model` group, over the same three sizes as the kernel bench) and the
+`[[bench]]` stanza in `core/Cargo.toml`. Both models are built with
+`select_output_outlets` + `into_optimized()?.into_runnable()?`; the 3-op proxy
+wires `source(f16) → Cast(f32) → sigmoid() → Cast(f16)`.
+
+**Verify:** `cargo bench -p tract-core --bench sigmoid_f16_model` on the M3 —
+compiles, both ids run to completion at all three sizes, fmt clean, no new clippy
+warnings. `into_optimized()` keeps the two casts (does not collapse the 3-op graph
+back to a single f16 dispatch), so the D proxy measures the real 3-op path.
+M3 numbers ignored per methodology.
 
 ---
 
