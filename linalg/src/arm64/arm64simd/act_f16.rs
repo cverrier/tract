@@ -6,6 +6,8 @@
 //! by converting into an f32 scratch, running the existing f32 kernel, and
 //! converting back — rather than dropping to the generic scalar path.
 
+use std::mem::MaybeUninit;
+
 use tract_data::internal::f16;
 
 /// f32 scratch length for the f16 round-trip. 4096 f32 = 16 KiB, comfortably
@@ -154,8 +156,11 @@ ew_impl_wrap!(
         if buf.is_empty() {
             return;
         }
-        let mut scratch = AlignedScratch([0f32; CHUNK]);
-        let s = &mut scratch.0;
+        let mut scratch = MaybeUninit::<AlignedScratch>::uninit();
+        // SAFETY: f32 has no invalid bit patterns, and every `s[..n]` element is
+        // written by `cvt_f16_to_f32` before the kernel or `cvt_f32_to_f16` reads
+        // it, so the scratch never needs zero-initialising.
+        let s = unsafe { &mut (*scratch.as_mut_ptr()).0 };
         let mut i = 0;
         while i < buf.len() {
             let n = CHUNK.min(buf.len() - i);
