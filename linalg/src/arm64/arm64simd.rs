@@ -142,4 +142,4 @@ pub fn plug(ops: &mut Ops) {
 
 tanh_impl!(f32, arm64simd_tanh_f32_4n, 4, 4, true);
 sigmoid_impl!(f32, arm64simd_sigmoid_f32_4n, 4, 4, true);
-sigmoid_impl!(f16, arm64simd_sigmoid_f16_4n, 4, 8, true);
+sigmoid_impl!(f16, arm64simd_sigmoid_f16_4n_fused, 4, 8, true);

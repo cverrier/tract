@@ -14,8 +14,8 @@ this compares to three alternatives before accepting it.
 
 | ID | Name | Altitude | Measured via |
 |----|------|----------|--------------|
-| **A** | `neon-f32-roundtrip` | linalg kernel | already exists (`arm64simd_sigmoid_f16_32n`) |
-| **B** | `neon-f32-fused` | linalg kernel | new fused kernel: convert→sigmoid→convert in registers, one pass, no scratch |
+| **A** | `neon-f32-roundtrip` | linalg kernel | already exists (`arm64simd_sigmoid_f16_4n`) |
+| **B** | `neon-f32-fused` | linalg kernel | new fused kernel (`arm64simd_sigmoid_f16_4n_fused`): convert→sigmoid→convert in registers, one pass, no scratch |
 | **C** | `core-cast-roundtrip` | tract-core closure | proxy: `cast_to::<f32>` → f32 kernel → `cast_to::<f16>` |
 | **D** | `codegen-3op` | tract-core graph | proxy: `source(f16)→Cast(f32)→sigmoid→Cast(f16)`, optimized+run |
 | — | `native-fp16` | linalg kernel | ceiling (`arm64fp16_sigmoid_f16_8n`) |
@@ -38,26 +38,27 @@ fallback kernels A/B/C are measured directly by name (bypassing dispatch), so
 they faithfully reflect the non-fp16 fallback cost.
 
 **Build gotcha:** `linalg/build.rs` emits `rerun-if-changed` per template, which
-disables cargo's package change scanning — a *new* `.S.j2` doesn't trigger a
-build-script rerun, so a cached cross-build never generates the kernel and the
-link fails (undefined `arm64simd_sigmoid_f16_4n`). Fix: touch `build.rs` or
-`cargo clean -p tract-linalg`. Pre-existing behaviour.
+disables cargo's package change scanning — a *new* or renamed `.S.j2` doesn't
+trigger a build-script rerun, so a cached cross-build never generates the kernel
+and the link fails (undefined `arm64simd_sigmoid_f16_4n_fused`). Fix: touch
+`build.rs` — a bare `cargo clean -p tract-linalg` clears only the host target,
+not the dinghy cross-build. Pre-existing behaviour.
 
 Kernel-level (`sigmoid_f16_arm64`):
 
 | size | generic | A roundtrip | B fused | C core-cast | native-fp16 |
 |------|---------|-------------|---------|-------------|-------------|
-| 1024 (L1)      | 15.11 | 139.75 | **159.95** | 53.90 | 665.75 |
-| 32768 (L2)     | 15.10 | 139.99 | **159.55** | 57.59 | 657.09 |
-| 1048576 (DRAM) | 15.08 | 138.40 | **157.74** | 57.52 | 652.51 |
+| 1024 (L1)      | 15.09 | 140.89 | **159.89** | 54.17 | 664.54 |
+| 32768 (L2)     | 15.08 | 140.30 | **159.31** | 57.63 | 656.09 |
+| 1048576 (DRAM) | 15.03 | 137.83 | **157.86** | 57.53 | 655.77 |
 
 Model-level (`sigmoid_f16_model`):
 
 | size | one-op (native on this SKU) | D codegen-3op |
 |------|-----------------------------|---------------|
-| 1024 (L1)      | 204.88 | 43.38 |
-| 32768 (L2)     | 495.97 | 56.78 |
-| 1048576 (DRAM) | 456.69 | 57.06 |
+| 1024 (L1)      | 201.61 | 43.95 |
+| 32768 (L2)     | 493.57 | 56.87 |
+| 1048576 (DRAM) | 459.41 | 57.27 |
 
 Reproduce (A55 frequency-locked, `performance` governor):
 
@@ -81,7 +82,7 @@ M3 smoke check (numbers ignored): same two `cargo bench` commands without dinghy
 
 | axis | A roundtrip | B fused | C closure | D codegen |
 |------|-------------|---------|-----------|-----------|
-| **Perf (A55)** | 138–140 | **157–160** (+14% vs A) | 54–58 | 43–57 |
+| **Perf (A55)** | 138–141 | **158–160** (+14% vs A) | 54–58 | 44–57 |
 | **unsafe/maint** | hand asm (conv+kernel+scratch) | **most** asm — full fused kernel per op | none | none |
 | **Portability** | arm64 only, per-arch | arm64 only, per-op | **all archs** (incl. x86_64 non-AVX512) | **all archs** |
 | **Generality** | per-op | poor (each of tanh/silu/gelu needs its own asm) | **any activation** | **any elementwise op** |

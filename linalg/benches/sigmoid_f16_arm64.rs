@@ -41,7 +41,7 @@ fn sigmoid_f16(c: &mut Criterion) {
         let mut tb = aligned_input(n);
         let sb = unsafe { tb.as_slice_mut_unchecked::<f16>() };
         group.bench_with_input(BenchmarkId::new("neon-f32-fused", n), &(), |b, _| {
-            b.iter(|| tract_linalg::arm64::arm64simd_sigmoid_f16_4n::run(sb, ()))
+            b.iter(|| tract_linalg::arm64::arm64simd_sigmoid_f16_4n_fused::run(sb, ()))
         });
 
         // Candidate C proxy: the tract-core f16 sigmoid closure body, i.e.
