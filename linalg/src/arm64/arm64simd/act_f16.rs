@@ -10,11 +10,19 @@ use std::mem::MaybeUninit;
 
 use tract_data::internal::f16;
 
-/// f32 scratch length for the f16 round-trip. 4096 f32 = 16 KiB, comfortably
-/// within L1 on every aarch64 core we target, so both conversions and the f32
-/// kernel keep hitting L1. Not tied to the cvt block width: the conversions
-/// handle any length.
-const CHUNK: usize = 4096;
+/// f32 scratch length for the f16 round-trip, in elements. Kept small so the
+/// scratch stays cache-hot across the three passes over each chunk (convert in,
+/// run the f32 kernel in place, convert out) instead of being sized to fill a
+/// cache level. Must stay a multiple of 4: the f32 sigmoid kernel is called
+/// directly here, bypassing the alignment helper, and steps 4 lanes at a time
+/// with no scalar tail, so a non-multiple count would run off the scratch. The
+/// conversions handle any length, so nothing else constrains it.
+const CHUNK: usize = 256;
+
+const _: () = assert!(
+    CHUNK % 4 == 0,
+    "f32 sigmoid kernel steps 4 lanes with no tail; CHUNK must stay a multiple of 4"
+);
 
 #[repr(C, align(16))]
 struct AlignedScratch([f32; CHUNK]);
