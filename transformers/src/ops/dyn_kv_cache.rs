@@ -275,6 +275,15 @@ impl FrozenOpState for FrozenDynKeyValueCacheState {
             kv_cache: self.kv_cache.clone().map(|t| t.into_tvalue()),
         })
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(DynKeyValueCacheState {
+            axis: self.axis,
+            name: self.name,
+            past_sequence_fact: self.past_sequence_fact,
+            kv_cache: self.kv_cache.map(|t| t.into_tvalue()),
+        })
+    }
 }
 
 /// Reverse of `replace_kv_cache`: replaces a DynKeyValueCache node with Source + Concat,

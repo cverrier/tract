@@ -165,6 +165,16 @@ impl FrozenOpState for FrozenGpuDynKVCacheState {
             kv_cache: self.kv_cache.clone().map(|t| t.into_tensor().into_tvalue()),
         })
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(GpuDynKVCacheState {
+            node_id: self.node_id,
+            name: self.name,
+            axis: self.axis,
+            past_sequence_fact: self.past_sequence_fact,
+            kv_cache: self.kv_cache.map(|t| t.into_tensor().into_tvalue()),
+        })
+    }
 }
 
 #[derive(Clone)]

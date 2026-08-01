@@ -169,10 +169,18 @@ impl FrozenOpState for FrozenSubmodelOpState {
     fn unfreeze(&self) -> Box<dyn OpState> {
         Box::new(self.unfreeze())
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new((*self).unfreeze_into())
+    }
 }
 
 impl OpStateFreeze for TypedModelOpState {
     fn freeze(&self) -> Box<dyn FrozenOpState> {
         Box::new(self.freeze())
+    }
+
+    fn freeze_into(self: Box<Self>) -> Box<dyn FrozenOpState> {
+        Box::new((*self).freeze_into())
     }
 }

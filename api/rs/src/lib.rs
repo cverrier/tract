@@ -438,9 +438,6 @@ impl Clone for State {
     }
 }
 
-// Safety: FrozenState is Send
-unsafe impl Send for State {}
-
 impl StateInterface for State {
     type Fact = Fact;
     type Tensor = Tensor;
@@ -457,7 +454,7 @@ impl StateInterface for State {
         let inputs: TVec<TValue> =
             inputs.into_inputs()?.into_iter().map(|v| v.0.into_tvalue()).collect();
         let frozen = self.0.take().context("State has been invalidated")?;
-        let mut state = frozen.unfreeze();
+        let mut state = frozen.unfreeze_into();
         let outputs = state.run(inputs)?;
         self.0 = Some(state.freeze_into());
         Ok(outputs.into_iter().map(|t| Tensor(t.into_arc_tensor())).collect())

@@ -95,6 +95,10 @@ impl_downcast!(State);
 
 pub trait FrozenState: Any + Debug + DynClone + Send {
     fn unfreeze(&self) -> Box<dyn State>;
+    /// Consuming unfreeze: moves data instead of cloning.
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn State> {
+        self.unfreeze()
+    }
     fn input_count(&self) -> usize;
     fn output_count(&self) -> usize;
 }
@@ -172,6 +176,10 @@ impl State for TypedSimpleState {
 impl FrozenState for TypedFrozenSimpleState {
     fn unfreeze(&self) -> Box<dyn State> {
         Box::new(TypedFrozenSimpleState::unfreeze(self))
+    }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn State> {
+        Box::new(TypedFrozenSimpleState::unfreeze_into(*self))
     }
 
     fn input_count(&self) -> usize {

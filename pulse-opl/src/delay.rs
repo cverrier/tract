@@ -216,4 +216,8 @@ impl FrozenOpState for FrozenDelayState {
     fn unfreeze(&self) -> Box<dyn OpState> {
         Box::new(DelayState { buffer: self.buffer.as_ref().map(|t| t.clone().into_tensor()) })
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(DelayState { buffer: self.buffer.map(|t| t.into_tensor()) })
+    }
 }

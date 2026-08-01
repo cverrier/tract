@@ -118,6 +118,15 @@ impl FrozenOpState for FrozenState {
             model_state: self.model_state.unfreeze(),
         })
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(State {
+            op: self.op,
+            position: self.position,
+            hidden_state: self.hidden_state.into_iter().map(|t| t.into_tvalue()).collect(),
+            model_state: self.model_state.unfreeze_into(),
+        })
+    }
 }
 
 impl State {

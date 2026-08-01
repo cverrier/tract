@@ -521,6 +521,20 @@ impl OpStateFreeze for QuantizedDynKvCacheState {
             len: self.len,
         })
     }
+
+    fn freeze_into(self: Box<Self>) -> Box<dyn FrozenOpState> {
+        Box::new(FrozenQuantizedDynKvCacheState {
+            name: self.name,
+            axis: self.axis,
+            bits: self.bits,
+            per_channel: self.per_channel,
+            past_sequence_fact: self.past_sequence_fact,
+            caches: self.caches,
+            lead_shape: self.lead_shape,
+            d: self.d,
+            len: self.len,
+        })
+    }
 }
 
 impl FrozenOpState for FrozenQuantizedDynKvCacheState {
@@ -533,6 +547,20 @@ impl FrozenOpState for FrozenQuantizedDynKvCacheState {
             past_sequence_fact: self.past_sequence_fact.clone(),
             caches: self.caches.clone(),
             lead_shape: self.lead_shape.clone(),
+            d: self.d,
+            len: self.len,
+        })
+    }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(QuantizedDynKvCacheState {
+            name: self.name,
+            axis: self.axis,
+            bits: self.bits,
+            per_channel: self.per_channel,
+            past_sequence_fact: self.past_sequence_fact,
+            caches: self.caches,
+            lead_shape: self.lead_shape,
             d: self.d,
             len: self.len,
         })

@@ -126,6 +126,10 @@ impl FrozenOpState for FrozenCudaFusedAxisOpState {
     fn unfreeze(&self) -> Box<dyn OpState> {
         Box::new(CudaFusedAxisOpState { op_state: self.op_state.unfreeze() })
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(CudaFusedAxisOpState { op_state: self.op_state.unfreeze_into() })
+    }
 }
 
 impl Op for CudaFusedAxisOp {

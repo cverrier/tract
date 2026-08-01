@@ -706,6 +706,7 @@ where
                     }
                 })
                 .collect(),
+            cached_mmm_scratch_space: None,
         }
     }
 
@@ -713,6 +714,7 @@ where
         let plan = self.plan;
         let model = &plan.model;
         FrozenSimpleState {
+            cached_mmm_scratch_space: self.turn_state.cached_mmm_scratch_space.into_inner(),
             resolved_symbols: self.turn_state.resolved_symbols,
             scenario: self.turn_state.scenario,
             states: self.op_states.into_iter().map(|s| s.map(|s| s.freeze_into())).collect(),
@@ -755,7 +757,6 @@ where
     r
 }
 
-#[derive(Clone, Debug)]
 pub struct FrozenSimpleState<F, O>
 where
     F: Fact + Clone + 'static,
@@ -766,6 +767,44 @@ where
     pub scenario: Option<usize>,
     pub states: Vec<Option<Box<dyn FrozenOpState>>>,
     pub values: Vec<Option<TVec<Tensor>>>,
+    /// Only ever populated by the consuming `freeze_into`/`unfreeze_into` pair, so that a
+    /// state driven one turn at a time keeps its panel buffers instead of reallocating them
+    /// every run. The borrowing `freeze`/`unfreeze` leave it empty: they snapshot a state
+    /// that stays live, and the cache belongs to whichever side keeps running.
+    cached_mmm_scratch_space: Option<Box<dyn tract_linalg::mmm::ScratchSpace>>,
+}
+
+impl<F, O> Clone for FrozenSimpleState<F, O>
+where
+    F: Fact + Clone + 'static,
+    O: Debug + Display + AsRef<dyn Op> + AsMut<dyn Op> + Clone + 'static,
+{
+    fn clone(&self) -> Self {
+        FrozenSimpleState {
+            plan: self.plan.clone(),
+            resolved_symbols: self.resolved_symbols.clone(),
+            scenario: self.scenario,
+            states: self.states.clone(),
+            values: self.values.clone(),
+            cached_mmm_scratch_space: None,
+        }
+    }
+}
+
+impl<F, O> Debug for FrozenSimpleState<F, O>
+where
+    F: Fact + Clone + 'static,
+    O: Debug + Display + AsRef<dyn Op> + AsMut<dyn Op> + Clone + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrozenSimpleState")
+            .field("plan", &self.plan)
+            .field("resolved_symbols", &self.resolved_symbols)
+            .field("scenario", &self.scenario)
+            .field("states", &self.states)
+            .field("values", &self.values)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<F, O> FrozenSimpleState<F, O>
@@ -794,6 +833,24 @@ where
                     .collect(),
             },
             op_states: self.states.iter().map(|s| s.as_ref().map(|s| s.unfreeze())).collect(),
+        }
+    }
+
+    pub fn unfreeze_into(self) -> SimpleState<F, O> {
+        SimpleState {
+            plan: self.plan,
+            turn_state: TurnState {
+                resolved_symbols: self.resolved_symbols,
+                scenario: self.scenario,
+                cached_mmm_scratch_space: self.cached_mmm_scratch_space.into(),
+                scratch_extensions: anymap3::Map::new(),
+                values: self
+                    .values
+                    .into_iter()
+                    .map(|t| t.map(|t| t.into_iter().map(|t| t.into_tvalue()).collect()))
+                    .collect(),
+            },
+            op_states: self.states.into_iter().map(|s| s.map(|s| s.unfreeze_into())).collect(),
         }
     }
 }
@@ -827,5 +884,39 @@ mod test {
     #[test]
     fn frozen_type_state_is_send() {
         is_send::<TypedFrozenSimpleState>();
+    }
+
+    fn matmul_state() -> TractResult<TypedSimpleState> {
+        let mut model = TypedModel::default();
+        let a = model.add_source("a", f32::fact([4, 4]))?;
+        let b = model.add_const("b", Tensor::zero::<f32>(&[4, 4])?)?;
+        let mm = model.wire_node(
+            "mm",
+            crate::ops::einsum::EinSum::new("mk,kn->mn".parse()?, f32::datum_type()),
+            &[a, b],
+        )?;
+        model.select_output_outlets(&mm)?;
+        let plan = SimplePlan::new(model.into_optimized()?)?;
+        let mut state = SimpleState::new(&plan)?;
+        state.run(tvec!(Tensor::zero::<f32>(&[4, 4])?.into_tvalue()))?;
+        Ok(state)
+    }
+
+    #[test]
+    fn consuming_round_trip_carries_mmm_scratch_space() -> TractResult<()> {
+        let state = matmul_state()?;
+        assert!(state.turn_state.cached_mmm_scratch_space.borrow().is_some());
+        let round_tripped = state.freeze_into().unfreeze_into();
+        assert!(round_tripped.turn_state.cached_mmm_scratch_space.borrow().is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn borrowing_round_trip_drops_mmm_scratch_space() -> TractResult<()> {
+        let state = matmul_state()?;
+        let snapshot = state.freeze().unfreeze();
+        assert!(snapshot.turn_state.cached_mmm_scratch_space.borrow().is_none());
+        assert!(state.turn_state.cached_mmm_scratch_space.borrow().is_some());
+        Ok(())
     }
 }

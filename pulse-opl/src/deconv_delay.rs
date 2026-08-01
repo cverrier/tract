@@ -141,4 +141,11 @@ impl FrozenOpState for FrozenDeconvDelayState {
             buffer: self.buffer.as_ref().map(|t| t.clone().into_tensor()),
         })
     }
+
+    fn unfreeze_into(self: Box<Self>) -> Box<dyn OpState> {
+        Box::new(DeconvDelayState {
+            valid_inputed: self.valid_inputed,
+            buffer: self.buffer.map(|t| t.into_tensor()),
+        })
+    }
 }
