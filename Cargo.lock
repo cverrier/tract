@@ -4920,6 +4920,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tract-learn"
+version = "0.23.5-pre"
+dependencies = [
+ "tract-core",
+ "tract-nnef",
+]
+
+[[package]]
 name = "tract-libcli"
 version = "0.23.5-pre"
 dependencies = [

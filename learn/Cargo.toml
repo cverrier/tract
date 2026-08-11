@@ -1,0 +1,11 @@
+[package]
+name = "tract-learn"
+version = "0.23.5-pre"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Hands-on course on the tract compilation pipeline. Not part of the shipped surface."
+
+[dependencies]
+tract-core.workspace = true
+tract-nnef.workspace = true
